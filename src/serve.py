@@ -1,36 +1,28 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from google.cloud import storage
 import joblib
 import os
 
 app = FastAPI()
 
-GCS_BUCKET = os.environ.get("GCS_BUCKET", "mlops-bucket")
-GCS_MODEL_KEY = "models/latest/model.pkl"
+AZURE_STORAGE_CONNECTION_STRING = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+CLOUD_BUCKET = os.environ.get("CLOUD_BUCKET", "mlops-data")
+MODEL_KEY = "models/latest/model.pkl"
 MODEL_PATH = os.path.expanduser("~/models/model.pkl")
 
 
 def download_model():
     """
-    Tai file model.pkl tu GCS ve may khi server khoi dong.
-
-    Ham nay duoc goi mot lan khi module duoc import. Su dung
-    GOOGLE_APPLICATION_CREDENTIALS de xac thuc (duoc dat trong systemd service).
+    Tai file model.pkl tu Azure Blob Storage ve may khi server khoi dong.
     """
-    # TODO 1: Tao storage.Client()
-    client = storage.Client()
-
-    # TODO 2: Lay bucket va blob tuong ung
-    bucket = client.bucket(GCS_BUCKET)
-    blob = bucket.blob(GCS_MODEL_KEY)
-
-    # TODO 3: Tai file model xuong may
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    blob.download_to_filename(MODEL_PATH)
-
-    # TODO 4: In thong bao thanh cong
-    print("Model da duoc tai xuong tu GCS.")
+    if AZURE_STORAGE_CONNECTION_STRING:
+        from azure.storage.blob import BlobServiceClient
+        blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+        blob_client = blob_service_client.get_blob_client(container=CLOUD_BUCKET, blob=MODEL_KEY)
+        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        with open(MODEL_PATH, "wb") as f:
+            f.write(blob_client.download_blob().readall())
+        print("Model da duoc tai xuong tu Azure Blob Storage.")
 
 
 if os.environ.get("AUTO_DOWNLOAD_MODEL", "false").lower() == "true":
@@ -56,7 +48,6 @@ def health():
 
     Tra ve: {"status": "ok"}
     """
-    # TODO 5: Tra ve dict {"status": "ok"}
     return {"status": "ok"}
 
 
@@ -67,25 +58,14 @@ def predict(req: PredictRequest):
 
     Dau vao : JSON {"features": [f1, f2, ..., f12]}
     Dau ra  : JSON {"prediction": <0|1|2>, "label": <"thap"|"trung_binh"|"cao">}
-
-    Thu tu 12 dac trung (khop voi thu tu trong FEATURE_NAMES cua test):
-        fixed_acidity, volatile_acidity, citric_acid, residual_sugar,
-        chlorides, free_sulfur_dioxide, total_sulfur_dioxide, density,
-        pH, sulphates, alcohol, wine_type
     """
-    # TODO 6: Kiem tra so luong dac trung.
-    # Neu len(req.features) != 12, raise HTTPException(status_code=400, ...)
     if len(req.features) != 12:
         raise HTTPException(status_code=400, detail="Expected 12 features (wine quality)")
 
     if model is None:
         raise HTTPException(status_code=500, detail="Model is not loaded")
 
-    # TODO 7: Goi model.predict([req.features]) de lay ket qua du doan.
     pred = int(model.predict([req.features])[0])
-
-    # TODO 8: Tra ve dict chua "prediction" (int) va "label" (string).
-    # Nhan tuong ung: 0 -> "thap", 1 -> "trung_binh", 2 -> "cao"
     label_map = {0: "thap", 1: "trung_binh", 2: "cao"}
     label = label_map.get(pred, "khong_xac_dinh")
 

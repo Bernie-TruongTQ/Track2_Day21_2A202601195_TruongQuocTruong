@@ -31,7 +31,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run unit tests
-        # TODO 1: Viet lenh de chay pytest tren thu muc tests/ voi co -v
         run: pytest tests/ -v
 
 
@@ -55,16 +54,13 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt dvc[azure] azure-storage-blob
 
       - name: Authenticate to Cloud Storage
-        # TODO 2: Ghi noi dung credentials ra file tam va set bien moi truong xac thuc.
         run: |
-          echo '${{ secrets.CLOUD_CREDENTIALS }}' > /tmp/sa-key.json
-          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
+          echo "AZURE_STORAGE_CONNECTION_STRING=${{ secrets.CLOUD_CREDENTIALS }}" >> $GITHUB_ENV
 
       - name: Pull data with DVC
-        # TODO 3: Pull cac file du lieu can thiet tu cloud storage bang lenh dvc pull.
         run: dvc pull data/train_phase1.csv.dvc data/eval.csv.dvc
 
       - name: Train model
@@ -72,26 +68,29 @@ jobs:
 
       - name: Read metrics
         id: read_metrics
-        # TODO 4: Doc gia tri "accuracy" tu outputs/metrics.json bang Python inline.
         run: |
           ACC=$(python -c "import json; d=json.load(open('outputs/metrics.json')); print(d['accuracy'])")
           echo "accuracy=$ACC" >> $GITHUB_OUTPUT
 
       - name: Upload model to Cloud Storage
-        # TODO 5: Su dung cloud SDK de upload models/model.pkl len <bucket>/models/latest/model.pkl
         env:
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.CLOUD_CREDENTIALS }}
           CLOUD_BUCKET: ${{ secrets.CLOUD_BUCKET }}
         run: |
           python - <<'EOF'
           import os
-          from google.cloud import storage
+          from azure.storage.blob import BlobServiceClient
 
-          bucket_name = os.environ["CLOUD_BUCKET"]
-          client = storage.Client()
-          bucket = client.bucket(bucket_name)
-          blob = bucket.blob("models/latest/model.pkl")
-          blob.upload_from_filename("models/model.pkl")
-          print(f"Successfully uploaded models/model.pkl to gs://{bucket_name}/models/latest/model.pkl")
+          conn_str = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
+          container_name = os.environ.get("CLOUD_BUCKET", "mlops-data")
+
+          blob_service_client = BlobServiceClient.from_connection_string(conn_str)
+          blob_client = blob_service_client.get_blob_client(container=container_name, blob="models/latest/model.pkl")
+
+          with open("models/model.pkl", "rb") as data:
+              blob_client.upload_blob(data, overwrite=True)
+
+          print(f"Successfully uploaded models/model.pkl to azure://{container_name}/models/latest/model.pkl")
           EOF
 
       - name: Save metrics as artifact
@@ -114,7 +113,6 @@ jobs:
     steps:
 
       - name: Check eval gate
-        # TODO 6: Doc accuracy tu output cua job train.
         run: |
           python - <<'EOF'
           import os
